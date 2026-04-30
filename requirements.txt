@@ -7,3 +7,5 @@ sentence-transformers
 faiss-cpu
 pydantic
 python-multipart
+python-dotenv
+langchain-google-genai
