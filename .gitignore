@@ -4,4 +4,7 @@ __pycache__/
 .env
 .vscode/
 node_modules/
+frontend/dist/
+backend/*.db
+backend-server*.log
 .DS_Store

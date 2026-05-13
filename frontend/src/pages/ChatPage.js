@@ -1,34 +1,18 @@
 import React, { useEffect, useMemo, useState } from "react";
 import ChatWindow from "../components/ChatWindow.js";
 import Header from "../components/Header.js";
+import {
+  createChatSession,
+  fetchSessionMessages,
+  fetchSessions,
+} from "../services/api.js";
 
-const STORAGE_KEY = "hebut-rag-chat-state";
+const STORAGE_KEY = "hebut-rag-recent-sessions";
 const h = React.createElement;
 
-const courses = [
-  {
-    id: "software-engineering",
-    name: "Software Engineering",
-    shortName: "SE",
-    description: "Lecture slides, course notes, and review materials.",
-  },
-  {
-    id: "data-structures-and-algorithms",
-    name: "Data Structures and Algorithms",
-    shortName: "DSA",
-    description: "Arrays, linked lists, trees, graphs, sorting, searching, and algorithm analysis.",
-  },
-  {
-    id: "product-service-development",
-    name: "Product and Service Development",
-    shortName: "PSD",
-    description: "Product lifecycle, opportunities, concepts, refinement, and service development.",
-  },
-];
-
-function createSession(courseId, title = "New conversation") {
+function createSession(courseId, userId, title = "New conversation") {
   return {
-    id: `${courseId}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+    id: `${courseId}-${userId}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
     courseId,
     title,
     preview: "No messages yet",
@@ -37,142 +21,125 @@ function createSession(courseId, title = "New conversation") {
   };
 }
 
-const defaultSessions = [
-  {
-    id: "software-engineering-demo",
-    courseId: "software-engineering",
-    title: "Software quality review",
-    preview: "How do configuration management and QA relate?",
-    updatedAt: "Today",
-    messages: [
-      {
-        role: "assistant",
-        content:
-          "Welcome back. Ask about lectures, concepts, revision points, or course materials.",
-      },
-    ],
-  },
-  createSession("data-structures-and-algorithms", "Tree traversal notes"),
-  createSession("product-service-development", "Product strategy questions"),
-];
-
-function loadInitialState() {
+function readRecentSessions(userId) {
   try {
     const savedState = JSON.parse(window.localStorage.getItem(STORAGE_KEY));
-    const hasValidSessions =
-      Array.isArray(savedState?.sessions) && savedState.sessions.length > 0;
-
-    if (!hasValidSessions) {
-      throw new Error("Missing saved sessions");
-    }
-
-    const activeSession =
-      savedState.sessions.find(
-        (session) => session.id === savedState.activeSessionId
-      ) ?? savedState.sessions[0];
-
-    const selectedCourse =
-      courses.find((course) => course.id === savedState.selectedCourseId) ??
-      courses.find((course) => course.id === activeSession.courseId) ??
-      courses[0];
-
-    return {
-      selectedCourseId: selectedCourse.id,
-      activeSessionId: activeSession.id,
-      sessions: savedState.sessions,
-    };
+    const recentSessions = savedState?.[userId];
+    return Array.isArray(recentSessions) ? recentSessions.slice(0, 3) : [];
   } catch {
-    return {
-      selectedCourseId: courses[0].id,
-      activeSessionId: defaultSessions[0].id,
-      sessions: defaultSessions,
-    };
+    return [];
   }
 }
 
-export default function ChatPage() {
-  const initialState = useMemo(() => loadInitialState(), []);
+function writeRecentSessions(userId, sessions) {
+  const savedState = JSON.parse(window.localStorage.getItem(STORAGE_KEY) || "{}");
+  savedState[userId] = sessions.slice(0, 3);
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(savedState));
+}
+
+export default function ChatPage({ user, courses, onManageCourses, onLogout }) {
+  const firstCourse = courses[0];
+  const initialRecentSessions = useMemo(() => readRecentSessions(user.id), [user.id]);
   const [selectedCourseId, setSelectedCourseId] = useState(
-    initialState.selectedCourseId
+    initialRecentSessions[0]?.courseId ?? firstCourse?.id
   );
-  const [sessions, setSessions] = useState(initialState.sessions);
+  const [recentSessions, setRecentSessions] = useState(initialRecentSessions);
+  const [archiveSessions, setArchiveSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(
-    initialState.activeSessionId
+    initialRecentSessions[0]?.id ?? ""
   );
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
 
   const selectedCourse = useMemo(
-    () => courses.find((course) => course.id === selectedCourseId) ?? courses[0],
-    [selectedCourseId]
+    () => courses.find((course) => course.id === selectedCourseId) ?? firstCourse,
+    [courses, firstCourse, selectedCourseId]
   );
 
+  const allSessions = useMemo(() => {
+    const recentIds = new Set(recentSessions.map((session) => session.id));
+    return [
+      ...recentSessions,
+      ...archiveSessions.filter((session) => !recentIds.has(session.id)),
+    ];
+  }, [archiveSessions, recentSessions]);
+
   const activeSession =
-    sessions.find((session) => session.id === activeSessionId) ?? sessions[0];
+    allSessions.find((session) => session.id === activeSessionId) ??
+    recentSessions[0] ??
+    allSessions[0];
 
   useEffect(() => {
-    window.localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        selectedCourseId,
-        activeSessionId,
-        sessions,
+    if (!activeSession && firstCourse) {
+      const newSession = createSession(firstCourse.id, user.id);
+      setRecentSessions([newSession]);
+      setSelectedCourseId(firstCourse.id);
+      setActiveSessionId(newSession.id);
+      createChatSession({ ...newSession, userId: user.id }).catch(() => {});
+    }
+  }, [activeSession, firstCourse, user.id]);
+
+  useEffect(() => {
+    fetchSessions(user.id)
+      .then((sessions) => {
+        setArchiveSessions(sessions);
+        if (!activeSessionId && sessions.length > 0) {
+          setActiveSessionId(sessions[0].id);
+          setSelectedCourseId(sessions[0].courseId);
+        }
       })
-    );
-  }, [activeSessionId, selectedCourseId, sessions]);
+      .catch(() => setArchiveSessions([]));
+  }, [activeSessionId, user.id]);
+
+  useEffect(() => {
+    writeRecentSessions(user.id, recentSessions);
+  }, [recentSessions, user.id]);
+
+  const promoteRecentSession = async (session) => {
+    let sessionWithMessages = session;
+    if (!Array.isArray(session.messages) || session.messages.length === 0) {
+      try {
+        const messages = await fetchSessionMessages(session.id);
+        sessionWithMessages = { ...session, messages };
+      } catch {
+        sessionWithMessages = { ...session, messages: [] };
+      }
+    }
+
+    setRecentSessions((prev) => [
+      sessionWithMessages,
+      ...prev.filter((item) => item.id !== sessionWithMessages.id),
+    ].slice(0, 3));
+    setActiveSessionId(sessionWithMessages.id);
+    setSelectedCourseId(sessionWithMessages.courseId);
+  };
 
   const handleCourseChange = (courseId) => {
     setSelectedCourseId(courseId);
 
-    const latestSessionForCourse = sessions.find(
+    const latestSessionForCourse = allSessions.find(
       (session) => session.courseId === courseId
     );
 
     if (latestSessionForCourse) {
-      setActiveSessionId(latestSessionForCourse.id);
+      promoteRecentSession(latestSessionForCourse);
       return;
     }
 
-    const newSession = createSession(courseId);
-    setSessions((prev) => [newSession, ...prev]);
+    const newSession = createSession(courseId, user.id);
+    setRecentSessions((prev) => [newSession, ...prev].slice(0, 3));
     setActiveSessionId(newSession.id);
+    createChatSession({ ...newSession, userId: user.id }).catch(() => {});
   };
 
   const handleNewChat = () => {
-    const newSession = createSession(selectedCourseId);
-    setSessions((prev) => [newSession, ...prev]);
+    const newSession = createSession(selectedCourseId, user.id);
+    setRecentSessions((prev) => [newSession, ...prev].slice(0, 3));
     setActiveSessionId(newSession.id);
-  };
-
-  const handleSelectSession = (sessionId) => {
-    const nextSession = sessions.find((session) => session.id === sessionId);
-    if (!nextSession) {
-      return;
-    }
-
-    setActiveSessionId(sessionId);
-    setSelectedCourseId(nextSession.courseId);
-  };
-
-  const handleDeleteSession = (sessionId) => {
-    setSessions((prev) => {
-      const remainingSessions = prev.filter((session) => session.id !== sessionId);
-
-      if (remainingSessions.length === 0) {
-        const fallbackSession = createSession(selectedCourseId);
-        setActiveSessionId(fallbackSession.id);
-        return [fallbackSession];
-      }
-
-      if (sessionId === activeSessionId) {
-        setActiveSessionId(remainingSessions[0].id);
-        setSelectedCourseId(remainingSessions[0].courseId);
-      }
-
-      return remainingSessions;
-    });
+    createChatSession({ ...newSession, userId: user.id }).catch(() => {});
   };
 
   const handleMessagesChange = (nextMessages) => {
-    setSessions((prev) =>
+    setRecentSessions((prev) =>
       prev.map((session) => {
         if (session.id !== activeSession.id) {
           return session;
@@ -194,6 +161,10 @@ export default function ChatPage() {
     );
   };
 
+  if (!selectedCourse || !activeSession) {
+    return h("div", { className: "app-shell" }, h("main", { className: "workspace loading-panel" }, "Loading workspace..."));
+  }
+
   return h(
     "div",
     { className: "app-shell" },
@@ -209,7 +180,13 @@ export default function ChatPage() {
           h("p", { className: "eyebrow" }, "Course Assistant"),
           h("h1", { className: "sidebar-title" }, "Ask your course materials beautifully.")
         ),
-        h("button", { className: "primary-button", onClick: handleNewChat }, "New Chat")
+        h("button", { className: "primary-button", onClick: handleNewChat }, "New Chat"),
+        h(
+          "div",
+          { className: "sidebar-actions" },
+          h("button", { onClick: onManageCourses }, "Manage Courses"),
+          h("button", { onClick: () => setIsHistoryOpen(true) }, "History")
+        )
       ),
       h(
         "section",
@@ -243,26 +220,24 @@ export default function ChatPage() {
       h(
         "section",
         { className: "sidebar-section sidebar-history" },
-        h("div", { className: "section-header" }, h("h2", null, "History"), h("span", null, sessions.length)),
+        h("div", { className: "section-header" }, h("h2", null, "Recent Local"), h("span", null, recentSessions.length)),
         h(
           "div",
           { className: "history-list" },
-          sessions.map((session) => {
+          recentSessions.map((session) => {
             const course = courses.find((item) => item.id === session.courseId);
             const isActive = session.id === activeSession.id;
 
             return h(
-              "div",
+              "button",
               {
                 key: session.id,
                 className: isActive ? "history-card active" : "history-card",
+                onClick: () => promoteRecentSession(session),
               },
               h(
-                "button",
-                {
-                  className: "history-content",
-                  onClick: () => handleSelectSession(session.id),
-                },
+                "div",
+                { className: "history-content" },
                 h(
                   "div",
                   { className: "history-card-top" },
@@ -271,31 +246,86 @@ export default function ChatPage() {
                 ),
                 h("p", null, session.preview),
                 h("small", null, course?.name ?? "Unknown course")
-              ),
-              h(
-                "button",
-                {
-                  className: "delete-history-button",
-                  "aria-label": `Delete ${session.title}`,
-                  onClick: () => handleDeleteSession(session.id),
-                  title: "Delete conversation",
-                },
-                "x"
               )
             );
           })
         )
-      )
+      ),
+      null
     ),
     h(
       "main",
       { className: "workspace" },
-      h(Header, { course: selectedCourse, session: activeSession }),
+      h(Header, {
+        course: selectedCourse,
+        session: activeSession,
+        user,
+        onLogout,
+      }),
       h(ChatWindow, {
         course: selectedCourse,
         messages: activeSession.messages,
         onMessagesChange: handleMessagesChange,
-      })
+        sessionId: activeSession.id,
+        userId: user.id,
+      }),
+      isHistoryOpen
+        ? h(
+            "div",
+            { className: "history-overlay" },
+            h(
+              "section",
+              { className: "history-panel" },
+              h(
+                "div",
+                { className: "history-panel-header" },
+                h(
+                  "div",
+                  null,
+                  h("p", { className: "eyebrow" }, "Complete History"),
+                  h("h3", null, "All conversations")
+                ),
+                h(
+                  "button",
+                  {
+                    className: "close-button",
+                    onClick: () => setIsHistoryOpen(false),
+                    "aria-label": "Close history",
+                  },
+                  "x"
+                )
+              ),
+              h(
+                "div",
+                { className: "full-history-list" },
+                archiveSessions.length === 0
+                  ? h("p", { className: "muted-text" }, "No saved conversations yet.")
+                  : archiveSessions.map((session) => {
+                      const course = courses.find(
+                        (item) => item.id === session.courseId
+                      );
+                      return h(
+                        "button",
+                        {
+                          key: session.id,
+                          className:
+                            session.id === activeSession.id
+                              ? "full-history-row active"
+                              : "full-history-row",
+                          onClick: async () => {
+                            await promoteRecentSession(session);
+                            setIsHistoryOpen(false);
+                          },
+                        },
+                        h("strong", null, session.title),
+                        h("span", null, session.preview),
+                        h("small", null, course?.name ?? "Unknown course")
+                      );
+                    })
+              )
+            )
+          )
+        : null
     )
   );
 }

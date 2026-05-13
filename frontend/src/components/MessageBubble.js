@@ -40,7 +40,7 @@ export default function MessageBubble({ message }) {
               h(
                 "strong",
                 null,
-                source.page ? `${source.source} · p.${source.page}` : source.source
+                source.page ? `${source.source} - p.${source.page}` : source.source
               ),
               h("small", null, source.content)
             )

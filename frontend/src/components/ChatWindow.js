@@ -11,7 +11,13 @@ const starterQuestions = [
   "Explain the most important concepts in simple language.",
 ];
 
-export default function ChatWindow({ course, messages, onMessagesChange }) {
+export default function ChatWindow({
+  course,
+  messages,
+  onMessagesChange,
+  sessionId,
+  userId,
+}) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -31,7 +37,7 @@ export default function ChatWindow({ course, messages, onMessagesChange }) {
     setError("");
 
     try {
-      const res = await askQuestion(text, course.id);
+      const res = await askQuestion(text, course.id, sessionId, userId);
       const botMessage = {
         role: "assistant",
         content: res.answer,
