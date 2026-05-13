@@ -48,6 +48,33 @@ AI_MODEL=gpt-4o-mini
 
 Do not commit `.env`; use `.env.example` as the template.
 
+## Run Locally
+
+Install the Python dependencies from the project root:
+
+```bash
+pip install -r requirements.txt
+```
+
+Start the backend API from the project root. If you are currently inside the
+`backend/` directory, run `cd ..` first:
+
+```bash
+uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+In another terminal, install the frontend dependencies and start the React
+development server:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open the frontend at `http://127.0.0.1:8080`. The frontend sends chat requests
+to the backend API at `http://127.0.0.1:8000`.
+
 ## Build A Course Vector Store
 
 ```bash
